@@ -725,6 +725,12 @@ int main(int argc, char** argv) {
                     "not removing PTS jitter\n");
   }
 
+  // Create and initialize the ConnectionParams struct
+  ConnectionParams params = {
+    .argv = argv,
+    .stream_id = stream_id,
+    .optind = optind
+  };
 
   // Optional SRT streaming via an appsink (needed for dynamic video bitrate)
   GstAppSinkCallbacks callbacks = {NULL, NULL, new_buf_cb};
@@ -769,12 +775,6 @@ int main(int argc, char** argv) {
     } while(ret_srt != 0);
   }
 
-  // Create and initialize the ConnectionParams struct
-  ConnectionParams params = {
-    .argv = argv,
-    .stream_id = stream_id,
-    .optind = optind
-  };
 
   // We can only monitor the connection when we use an appsink
   if (GST_IS_ELEMENT(srt_app_sink)) {
