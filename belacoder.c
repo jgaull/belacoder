@@ -99,17 +99,6 @@ void stop() {
   }
 }
 
-void reconnect_srt(char *srt_host, char *srt_port, char *stream_id) {
-  while (!quit) {
-    if (connect_srt(srt_host, srt_port, stream_id) == 0) {
-      fprintf(stderr, "Reconnected to SRT server.\n");
-      return;
-    }
-    fprintf(stderr, "Reconnection attempt failed. Retrying in 5 seconds...\n");
-    sleep(5);
-  }
-}
-
 /*
   This checks periodically for pipeline stalls. The alsasrc element tends to stall rather
   than error out when the input resolution changes for a live input into a Camlink 4K
@@ -455,6 +444,17 @@ int connect_srt(char *host, char *port, char *stream_id) {
   freeaddrinfo(addrs);
 
   return connected;
+}
+
+void reconnect_srt(char *srt_host, char *srt_port, char *stream_id) {
+  while (!quit) {
+    if (connect_srt(srt_host, srt_port, stream_id) == 0) {
+      fprintf(stderr, "Reconnected to SRT server.\n");
+      return;
+    }
+    fprintf(stderr, "Reconnection attempt failed. Retrying in 5 seconds...\n");
+    sleep(5);
+  }
 }
 
 void exit_syntax() {
