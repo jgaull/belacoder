@@ -89,6 +89,9 @@ uint64_t getms() {
   return time.tv_sec * 1000 + time.tv_nsec / 1000 / 1000;
 }
 
+/* Forward declarations */
+void reconnect_srt(char *srt_host, char *srt_port, char *stream_id);
+
 /* Attempts to stop the gstreamer pipeline cleanly
    Also sets up an alarm in case it doesn't */
 void stop() {
