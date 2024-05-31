@@ -99,6 +99,17 @@ void stop() {
   }
 }
 
+void reconnect_srt(char *srt_host, char *srt_port, char *stream_id) {
+  while (!quit) {
+    if (connect_srt(srt_host, srt_port, stream_id) == 0) {
+      fprintf(stderr, "Reconnected to SRT server.\n");
+      return;
+    }
+    fprintf(stderr, "Reconnection attempt failed. Retrying in 5 seconds...\n");
+    sleep(5);
+  }
+}
+
 /*
   This checks periodically for pipeline stalls. The alsasrc element tends to stall rather
   than error out when the input resolution changes for a live input into a Camlink 4K
@@ -313,7 +324,7 @@ gboolean connection_housekeeping() {
      and will fail to timeout if RTT was high */
   if (prev_ack_count != 0 && (ctime - prev_ack_ts) > SRT_ACK_TIMEOUT) {
     fprintf(stderr, "The SRT connection timed out, exiting\n");
-    stop();
+    reconnect_srt(argv[optind+1], argv[optind+2], stream_id);
   }
 
   // We can only update the bitrate when we have a configurable encoder
@@ -350,8 +361,8 @@ GstFlowReturn new_buf_cb(GstAppSink *sink, gpointer user_data) {
       int nb = srt_send(sock, pkt, SRT_PKT_SIZE);
       if (nb != SRT_PKT_SIZE) {
         if (!quit) {
-          fprintf(stderr, "The SRT connection failed, exiting\n");
-          stop();
+          fprintf(stderr, "The SRT connection failed, reconnecting\n");
+          reconnect_srt(argv[optind+1], argv[optind+2], stream_id);
         }
         code = GST_FLOW_ERROR;
         goto ret;
