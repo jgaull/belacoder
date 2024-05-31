@@ -11,7 +11,7 @@ Building
 
 Installing the dependencies on L4T / Ubuntu:
 
-    sudo apt-get install build-essential git libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev # let me know if I forgot anything
+    sudo apt-get install build-essential git libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev libgnutls28-dev # let me know if I forgot anything
     sudo apt-get install libsrt-dev # only available in Ubuntu 20.04
 
     # alternatively, manually installing SRT on older Ubuntu releases
