@@ -92,6 +92,12 @@ uint64_t getms() {
 /* Forward declarations */
 void reconnect_srt(char *srt_host, char *srt_port, char *stream_id);
 
+typedef struct {
+  char **argv;
+  char *stream_id;
+  int optind;
+} ConnectionParams;
+
 /* Attempts to stop the gstreamer pipeline cleanly
    Also sets up an alarm in case it doesn't */
 void stop() {
@@ -297,7 +303,12 @@ void update_bitrate(SRT_TRACEBSTATS *stats, uint64_t ctime) {
   }
 }
 
-gboolean connection_housekeeping() {
+gboolean connection_housekeeping(gpointer data) {
+  ConnectionParams *params = (ConnectionParams *)data;
+  char **argv = params->argv;
+  char *stream_id = params->stream_id;
+  int optind = params->optind;
+
   uint64_t ctime = getms();
   static uint64_t prev_ack_ts = 0;
   static uint64_t prev_ack_count = 0;
@@ -754,9 +765,16 @@ int main(int argc, char** argv) {
     } while(ret_srt != 0);
   }
 
+  // Create and initialize the ConnectionParams struct
+  ConnectionParams params = {
+    .argv = argv,
+    .stream_id = stream_id,
+    .optind = optind
+  };
+
   // We can only monitor the connection when we use an appsink
   if (GST_IS_ELEMENT(srt_app_sink)) {
-    g_timeout_add(BITRATE_UPDATE_INT, connection_housekeeping, NULL);
+    g_timeout_add(BITRATE_UPDATE_INT, connection_housekeeping, &params);
   }
 
   /*
