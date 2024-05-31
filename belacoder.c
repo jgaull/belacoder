@@ -343,6 +343,10 @@ GstFlowReturn new_buf_cb(GstAppSink *sink, gpointer user_data) {
   static char pkt[SRT_PKT_SIZE];
   static int pkt_len = 0;
   GstFlowReturn code = GST_FLOW_OK;
+  ConnectionParams *params = (ConnectionParams *)user_data;
+  char **argv = params->argv;
+  char *stream_id = params->stream_id;
+  int optind = params->optind;
 
   GstSample *sample = gst_app_sink_pull_sample(sink);
   if (!sample) return GST_FLOW_ERROR;
@@ -726,7 +730,7 @@ int main(int argc, char** argv) {
   GstAppSinkCallbacks callbacks = {NULL, NULL, new_buf_cb};
   GstElement *srt_app_sink = gst_bin_get_by_name(GST_BIN(gst_pipeline), "appsink");
   if (GST_IS_ELEMENT(srt_app_sink)) {
-    gst_app_sink_set_callbacks (GST_APP_SINK(srt_app_sink), &callbacks, NULL, NULL);
+    gst_app_sink_set_callbacks (GST_APP_SINK(srt_app_sink), &callbacks, &params, NULL);
     srt_host = argv[optind+1];
     srt_port = argv[optind+2];
 
