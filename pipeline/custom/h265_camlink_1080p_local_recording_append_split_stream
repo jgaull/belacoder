@@ -1,0 +1,13 @@
+v4l2src ! identity name=ptsfixup signal-handoffs=TRUE ! identity drop-buffer-flags=GST_BUFFER_FLAG_DROPPABLE ! identity name=v_delay signal-handoffs=TRUE ! textoverlay text='' valignment=top halignment=right font-desc="Monospace, 5" name=overlay ! queue ! nvvidconv interpolation-method=5 ! video/x-raw(memory:NVMM),width=1920,height=1080 ! tee name=video_tee
+
+video_tee. ! queue ! nvv4l2h265enc control-rate=1 qp-range="28,50:0,38:0,50" iframeinterval=60 preset-level=4 maxperf-enable=true EnableTwopassCBR=true insert-sps-pps=true name=venc_bps ! h265parse config-interval=-1 ! tee name=encoded_video_tee
+
+alsasrc device=hw:2 ! identity name=a_delay signal-handoffs=TRUE ! volume volume=1.0 ! audioconvert ! voaacenc bitrate=128000 ! aacparse ! tee name=encoded_audio_tee
+
+mpegtsmux name=mux
+encoded_video_tee. ! queue ! mux. encoded_audio_tee. ! queue ! mux.
+
+mux. ! queue ! tee name=mux_tee
+
+mux_tee. ! queue ! filesink location=/home/user/local_video_recording.ts append=true
+mux_tee. ! queue ! appsink name=appsink
