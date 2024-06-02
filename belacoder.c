@@ -371,7 +371,8 @@ GstFlowReturn new_buf_cb(GstAppSink *sink, gpointer user_data) {
           fprintf(stderr, "The SRT connection failed, reconnecting\n");
           reconnect_srt(argv[optind+1], argv[optind+2], stream_id);
         }
-        code = GST_FLOW_ERROR;
+        code = GST_FLOW_OK;  // Continue processing buffers even if SRT fails
+        pkt_len = 0;
         goto ret;
       }
       pkt_len = 0;
