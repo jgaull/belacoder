@@ -1,0 +1,17 @@
+srtsrc uri=srt://0.0.0.0:9000?mode=listener !
+tsdemux name=demux
+
+demux. ! h264parse !
+queue max-size-time=10000000000 max-size-buffers=1000 max-size-bytes=41943040 !
+identity name=v_delay signal-handoffs=TRUE ! vtdec !
+videoconvert !
+vtenc_h264 allow-frame-reordering=false realtime=true max-keyframe-interval=60 name=venc_kbps !
+h264parse config-interval=-1 ! mux.
+
+demux. ! aacparse !
+queue max-size-time=10000000000 max-size-buffers=1000 max-size-bytes=41943040 !
+avdec_aac ! identity name=a_delay signal-handoffs=TRUE !
+audioconvert ! avenc_aac bitrate=128000 ! aacparse ! mux.
+
+mpegtsmux name=mux !
+appsink name=appsink
