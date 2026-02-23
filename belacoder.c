@@ -17,10 +17,12 @@
 */
 
 #include <stdio.h>
+#include <string.h>
 #include <assert.h>
 #include <signal.h>
 #include <sys/mman.h>
 
+#include <gio/gio.h>
 #include <gst/gst.h>
 #include <gst/gstinfo.h>
 #include <gst/app/gstappsink.h>
@@ -75,6 +77,12 @@ GMainLoop *loop;
 GstElement *encoder, *overlay;
 SRTSOCKET sock = -1;
 int quit = 0;
+
+char *srt_host = NULL;
+char *srt_port = NULL;
+char *stream_id = NULL;
+int extract_caller_streamid = 1;
+int outbound_srt_connected = 0;
 
 int enc_bitrate_div = 1;
 
@@ -304,6 +312,8 @@ void update_bitrate(SRT_TRACEBSTATS *stats, uint64_t ctime) {
 }
 
 gboolean connection_housekeeping() {
+  if (!outbound_srt_connected) return TRUE;
+
   uint64_t ctime = getms();
   static uint64_t prev_ack_ts = 0;
   static uint64_t prev_ack_count = 0;
@@ -356,6 +366,10 @@ GstFlowReturn new_buf_cb(GstAppSink *sink, gpointer user_data) {
     pkt_len += copy_sz;
 
     if (pkt_len == srt_pkt_size) {
+      if (!outbound_srt_connected) {
+        pkt_len = 0;
+        continue;
+      }
       int nb = srt_send(sock, pkt, srt_pkt_size);
       if (nb != srt_pkt_size) {
         if (!quit) {
@@ -455,12 +469,73 @@ int connect_srt(char *host, char *port, char *stream_id) {
   return connected;
 }
 
+int connect_srt_outbound() {
+  int ret_srt;
+  do {
+    ret_srt = connect_srt(srt_host, srt_port, stream_id);
+    if (ret_srt != 0) {
+      char *reason = NULL;
+      switch (ret_srt) {
+        case SRT_REJ_TIMEOUT:
+          reason = "connection timed out";
+          break;
+        case SRT_REJX_CONFLICT:
+          reason = "streamid already in use";
+          break;
+        case SRT_REJX_FORBIDDEN:
+          reason = "invalid streamid";
+          break;
+        case -1:
+          reason = "failed to resolve address";
+          break;
+        case -2:
+          reason = "failed to open the SRT socket";
+          break;
+        default:
+          reason = "unknown";
+          break;
+      }
+      fprintf(stderr, "Failed to establish an SRT connection: %s. Retrying...\n", reason);
+      usleep(500*1000);
+    }
+  } while(ret_srt != 0 && !quit);
+  return ret_srt;
+}
+
+static gboolean cb_caller_connecting(GstElement *element, GSocketAddress *addr,
+                                     const gchar *caller_streamid, gpointer user_data) {
+  if (caller_streamid == NULL || caller_streamid[0] == '\0') {
+    fprintf(stderr, "Warning: caller connected but no streamid provided\n");
+    return TRUE;
+  }
+
+  fprintf(stderr, "Extracted streamid from caller\n");
+
+  if (outbound_srt_connected && stream_id != NULL && strcmp(stream_id, caller_streamid) != 0) {
+    fprintf(stderr, "Streamid changed, reconnecting outbound SRT...\n");
+    srt_close(sock);
+    sock = -1;
+    outbound_srt_connected = 0;
+  }
+
+  free(stream_id);
+  stream_id = strdup(caller_streamid);
+
+  if (!outbound_srt_connected) {
+    if (connect_srt_outbound() == 0) {
+      outbound_srt_connected = 1;
+    }
+  }
+
+  return TRUE;
+}
+
 void exit_syntax() {
   fprintf(stderr, "Syntax: belacoder PIPELINE_FILE ADDR PORT [options]\n\n");
   fprintf(stderr, "Options:\n");
   fprintf(stderr, "  -v                  Print the version and exit\n");
   fprintf(stderr, "  -d <delay>          Audio-video delay in milliseconds\n");
-  fprintf(stderr, "  -s <streamid>       SRT stream ID\n");
+  fprintf(stderr, "  -s <streamid>       SRT stream ID (default: extract from incoming caller)\n");
   fprintf(stderr, "  -l <latency>        SRT latency in milliseconds\n");
   fprintf(stderr, "  -r                  Reduced SRT packet size\n");
   fprintf(stderr, "  -b <bitrate file>   Bitrate settings file, see below\n\n");
@@ -580,9 +655,6 @@ void cb_sigalarm(int signum) {
 #define FIXED_ARGS 3
 int main(int argc, char** argv) {
   int opt;
-  char *srt_host = NULL;
-  char *srt_port = NULL;
-  char *stream_id = NULL;
   srt_latency = DEF_SRT_LATENCY;
 
   while ((opt = getopt(argc, argv, "d:b:s:l:rv")) != -1) {
@@ -598,7 +670,8 @@ int main(int argc, char** argv) {
         }
         break;
       case 's':
-        stream_id = optarg;
+        stream_id = strdup(optarg);
+        extract_caller_streamid = 0;
         break;
       case 'l':
         srt_latency = strtol(optarg, NULL, 10);
@@ -721,36 +794,36 @@ int main(int argc, char** argv) {
     srt_startup();
   }
 
-  if (GST_IS_ELEMENT(srt_app_sink)) {
-    int ret_srt;
-    do {
-      ret_srt = connect_srt(srt_host, srt_port, stream_id);
-      if (ret_srt != 0) {
-        char *reason = NULL;
-        switch (ret_srt) {
-          case SRT_REJ_TIMEOUT:
-            reason = "connection timed out";
-            break;
-          case SRT_REJX_CONFLICT:
-            reason = "streamid already in use";
-            break;
-          case SRT_REJX_FORBIDDEN:
-            reason = "invalid streamid";
-            break;
-          case -1:
-            reason = "failed to resolve address";
-            break;
-          case -2:
-            reason = "failed to open the SRT socket";
-            break;
-          default:
-            reason = "unknown";
-            break;
-        }
-        fprintf(stderr, "Failed to establish an SRT connection: %s. Retrying...\n", reason);
-        usleep(500*1000);
+  // Extract stream ID from incoming SRT caller (default unless -s is used)
+  if (extract_caller_streamid) {
+    GstIterator *iter = gst_bin_iterate_sources(GST_BIN(gst_pipeline));
+    GValue item = G_VALUE_INIT;
+    gboolean found = FALSE;
+    while (gst_iterator_next(iter, &item) == GST_ITERATOR_OK) {
+      GstElement *elem = g_value_get_object(&item);
+      GstElementFactory *factory = gst_element_get_factory(elem);
+      if (factory && g_strcmp0(gst_plugin_feature_get_name(GST_PLUGIN_FEATURE(factory)), "srtsrc") == 0) {
+        g_object_set(elem, "authentication", TRUE, NULL);
+        g_signal_connect(elem, "caller-connecting", G_CALLBACK(cb_caller_connecting), NULL);
+        fprintf(stderr, "Listening for caller streamid on srtsrc element (authentication mode)\n");
+        found = TRUE;
+        g_value_reset(&item);
+        break;
       }
-    } while(ret_srt != 0);
+      g_value_reset(&item);
+    }
+    gst_iterator_free(iter);
+
+    if (!found) {
+      fprintf(stderr, "Error: No srtsrc element found in pipeline (needed to extract caller streamid)\n");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  // Connect outbound SRT immediately when not waiting for caller streamid
+  if (GST_IS_ELEMENT(srt_app_sink) && !extract_caller_streamid) {
+    connect_srt_outbound();
+    outbound_srt_connected = 1;
   }
 
   // We can only monitor the connection when we use an appsink
@@ -784,6 +857,8 @@ int main(int argc, char** argv) {
   if (sock >= 0) {
     srt_close(sock);
   }
+
+  free(stream_id);
 
   gst_element_set_state((GstElement*)gst_pipeline, GST_STATE_NULL);
 
