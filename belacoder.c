@@ -24,7 +24,9 @@
 #include <gst/gst.h>
 #include <gst/gstinfo.h>
 #include <gst/app/gstappsink.h>
+#ifndef __APPLE__
 #include <glib-unix.h>
+#endif
 
 #include <srt.h>
 #include <srt/access_control.h>
@@ -89,7 +91,11 @@ int srt_pkt_size = DEFAULT_SRT_PKT_SIZE;
 
 uint64_t getms() {
   struct timespec time = {0, 0};
+#ifdef __APPLE__
+  assert(clock_gettime(CLOCK_MONOTONIC, &time) == 0);
+#else
   assert(clock_gettime(CLOCK_MONOTONIC_RAW, &time) == 0);
+#endif
   return time.tv_sec * 1000 + time.tv_nsec / 1000 / 1000;
 }
 
@@ -660,7 +666,7 @@ int main(int argc, char** argv) {
   }
   cur_bitrate = max_bitrate;
   fprintf(stderr, "Max bitrate: %d\n", max_bitrate);
-  signal(SIGHUP, (__sighandler_t)read_bitrate_file);
+  signal(SIGHUP, (void (*)(int))read_bitrate_file);
 
   encoder = gst_bin_get_by_name(GST_BIN(gst_pipeline), "venc_bps");
   if (!GST_IS_ELEMENT(encoder)) {
