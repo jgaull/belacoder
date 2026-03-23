@@ -352,12 +352,19 @@ GstFlowReturn new_buf_cb(GstAppSink *sink, gpointer user_data) {
     if (pkt_len == srt_pkt_size) {
       int nb = srt_send(sock, pkt, srt_pkt_size);
       if (nb != srt_pkt_size) {
-        if (!quit) {
-          fprintf(stderr, "The SRT connection failed, exiting\n");
-          stop();
+        if (srt_getlasterror(NULL) == SRT_EASYNCSND) {
+          // Send buffer full under congestion - drop this packet and continue.
+          // The bitrate adaptation in connection_housekeeping will reduce
+          // the encoding bitrate to match available bandwidth.
+          pkt_len = 0;
+        } else {
+          if (!quit) {
+            fprintf(stderr, "The SRT connection failed, exiting\n");
+            stop();
+          }
+          code = GST_FLOW_ERROR;
+          goto ret;
         }
-        code = GST_FLOW_ERROR;
-        goto ret;
       }
       pkt_len = 0;
     }
@@ -427,6 +434,10 @@ int connect_srt(char *host, char *port, char *stream_id) {
 
   int32_t algo = 1;
   ret = srt_setsockflag(sock, SRTO_RETRANSMITALGO, &algo, sizeof(algo));
+  assert(ret == 0);
+
+  int snd_timeout = 100; // ms - don't block the pipeline if the send buffer is full
+  ret = srt_setsockflag(sock, SRTO_SNDTIMEO, &snd_timeout, sizeof(snd_timeout));
   assert(ret == 0);
 
   int connected = -3;
