@@ -123,8 +123,7 @@ gboolean stall_check(gpointer data) {
     return TRUE;
 
   if (pos != -1 && pos == prev_pos) {
-    fprintf(stderr, "Pipeline stall detected. Will exit now\n");
-    stop();
+    fprintf(stderr, "Pipeline stall detected (not exiting)\n");
   }
 
   prev_pos = pos;
@@ -356,6 +355,22 @@ GstFlowReturn new_buf_cb(GstAppSink *sink, gpointer user_data) {
           // Send buffer full under congestion - drop this packet and continue.
           // The bitrate adaptation in connection_housekeeping will reduce
           // the encoding bitrate to match available bandwidth.
+          static uint64_t last_log = 0;
+          static int drop_count = 0;
+          drop_count++;
+          uint64_t now = getms();
+          if (now - last_log >= 1000) {
+            SRT_TRACEBSTATS stats;
+            if (srt_bstats(sock, &stats, 0) == 0) {
+              fprintf(stderr, "SRT send buffer full: dropped %d pkts in last %llums "
+                      "(rtt=%.0fms, sndBuf=%dpkts, bw=%.1fMbps, bitrate=%d)\n",
+                      drop_count, (unsigned long long)(now - last_log),
+                      stats.msRTT, stats.pktSndBuf,
+                      stats.mbpsSendRate, cur_bitrate);
+            }
+            drop_count = 0;
+            last_log = now;
+          }
           pkt_len = 0;
         } else {
           if (!quit) {
